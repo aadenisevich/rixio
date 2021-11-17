@@ -1,21 +1,17 @@
-import { Observable, ReplaySubject, SchedulerLike, Subscriber, Subscription } from "rxjs"
+import { Observable, Subject, Subscriber, Subscription } from "rxjs"
 
-export abstract class MappedReplaySubject<S, T> extends ReplaySubject<T> {
+export abstract class MappedSubject<S, T> extends Subject<T> {
 	protected _subscription: Subscription | null = null
 	private _refCount = 0
 
-	protected constructor(
-		protected readonly _observable: Observable<S>,
-		bufferSize?: number | undefined,
-		windowTime?: number | undefined,
-		scheduler?: SchedulerLike | undefined
-	) {
-		super(bufferSize, windowTime, scheduler)
+	protected constructor(protected readonly _observable: Observable<S>) {
+		super()
 	}
 
 	protected abstract _onValue(source: S): void
 
 	_subscribe(subscriber: Subscriber<T>): Subscription {
+		// tslint:disable-line function-name
 		if (!this._subscription) {
 			this._subscription = this._observable.subscribe(v => this._onValue(v))
 		}
@@ -38,6 +34,7 @@ export abstract class MappedReplaySubject<S, T> extends ReplaySubject<T> {
 			this._subscription = null
 		}
 		this._refCount = 0
+
 		super.unsubscribe()
 	}
 }

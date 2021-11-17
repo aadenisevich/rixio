@@ -40,22 +40,25 @@ export function useRx<T>(observable: WrappedObservable<T>, deps: any[] = [observ
 	const [, setCount] = useState<number>(0)
 	const value = useRef<Wrapped<T>>(pendingWrapped)
 	const initial = useRef(true)
+	const memoized = useMemo(() => wrap(observable), [observable])
 
 	const sub = useMemo(
 		() =>
-			wrap(observable).subscribe(next => {
+			memoized.subscribe(next => {
+				console.log('NEXT', next)
 				const current = value.current
 				value.current = next
 				if (!initial.current) {
-					const fulfilled =
-						current.status === "fulfilled" && next.status === "fulfilled" && current.value !== next.value
-					if (current.status !== next.status || fulfilled) {
+					if (
+						current.status !== next.status 
+						|| (current.status === "fulfilled" && next.status === "fulfilled" && current.value !== next.value) 
+					) {
 						setCount(c => c + 1)
 					}
 				}
 			}),
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-		deps
+		[...deps, memoized]
 	)
 	useEffect(
 		() => () => {
@@ -65,7 +68,6 @@ export function useRx<T>(observable: WrappedObservable<T>, deps: any[] = [observ
 		[sub]
 	)
 	initial.current = false
-	console.log("CURRENT", value.current)
 	return value.current
 }
 

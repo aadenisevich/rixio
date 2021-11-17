@@ -171,6 +171,7 @@ describe("Rx", () => {
 			fireEvent.click(r.getByTestId("reload"))
 		})
 		await waitFor(() => {
+			console.log("123")
 			expect(r.getByTestId("test")).toHaveTextContent("pending")
 		})
 	})

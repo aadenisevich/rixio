@@ -1,7 +1,7 @@
 import type { Atom } from "@rixio/atom"
 import { noop, Observable } from "rxjs"
-import { first, skip } from "rxjs/operators"
-import { MappedReplaySubject } from "./mapped-replay-subject"
+import { filter, first, map } from "rxjs/operators"
+import { MappedSubject } from "./mapped-subject-1"
 import { CacheState, createFulfilledCache, idleCache } from "./domain"
 import { save } from "./impl"
 
@@ -13,31 +13,51 @@ export interface Memo<T> extends Observable<T> {
 	atom: Atom<CacheState<T>>
 }
 
-export class MemoImpl<T> extends MappedReplaySubject<CacheState<T>, T> implements Memo<T> {
-	private skip: number = 0
+export class MemoImpl<T> extends MappedSubject<CacheState<T>, T> implements Memo<T> {
     private shouldRefetch = false
 
-	constructor(private readonly _atom$: Atom<CacheState<T>>, private readonly _loader: () => Promise<T>) {
-		super(_atom$, 1)
-	}
-
-	get atom(): Atom<CacheState<T>> {
-		return this._atom$
+	constructor(public readonly atom: Atom<CacheState<T>>, private readonly _loader: () => Promise<T>) {
+		super(atom)
+		this.clear = this.clear.bind(this)
 	}
 
 	get(force = false): Promise<T> {
 		if (force || this.hasError) {
 			this.clear()
 		}
-		return this.pipe(skip(Math.max(this.skip, 0)), first()).toPromise()
+		const s = this.atom.get()
+		switch (s.status) {
+			case "idle":
+				save(this._loader(), this.atom).catch(noop)
+				break;
+			case "fulfilled":
+				return Promise.resolve(s.value)
+			case "rejected":
+				return Promise.reject(s.error)
+		}
+		return this.atom
+			.pipe(
+				filter(x => x.status === "fulfilled" || x.status === "rejected"),
+				map(x => {
+					if (x.status === "fulfilled") {
+						return x.value
+					}
+					if (x.status === "rejected") {
+						throw x.error
+					}
+					throw new Error("Never happen")
+				}),
+				first()
+			)
+			.toPromise()
 	}
 
 	set(value: T): void {
-		this._atom$.set(createFulfilledCache(value))
+		this.atom.set(createFulfilledCache(value))
 	}
 
 	modifyIfFulfilled(updateFn: (currentValue: T) => T): void {
-		this._atom$.modify(s => {
+		this.atom.modify(s => {
 			if (s.status === "fulfilled") {
 				return {
 					...s,
@@ -49,21 +69,17 @@ export class MemoImpl<T> extends MappedReplaySubject<CacheState<T>, T> implement
 	}
 
 	clear(): void {
-		this.skip = this.skip + 1
-		this._atom$.set(idleCache)
+		this.atom.set(idleCache)
 	}
 
 	protected _onValue(x: CacheState<T>) {
-        console.log(x.status)
 		switch (x.status) {
 			case "idle":
-				save(this._loader(), this._atom$).catch(noop)
+				save(this._loader(), this.atom).catch(noop)
 				break
 			case "rejected":
                 if (this.shouldRefetch) {
-                    console.log("refetching")
-                    save(this._loader(), this._atom$).catch(noop)
-                    this.shouldRefetch = false
+					this.atom.set(idleCache)
                 } else {
                     this.error(x.error)
                     this.shouldRefetch = true
