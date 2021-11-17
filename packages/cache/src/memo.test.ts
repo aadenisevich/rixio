@@ -1,6 +1,6 @@
 import { Atom } from "@rixio/atom"
 import { noop } from "rxjs"
-import { first, map } from "rxjs/operators"
+import { first, map, take } from "rxjs/operators"
 import waitForExpect from "wait-for-expect"
 import { CacheState, idleCache } from "./domain"
 import { MemoImpl } from "./memo"
@@ -24,14 +24,32 @@ describe("MemoImpl", () => {
 		expect(times).toBe(1)
 	})
 
-	test("should set idle after clear", () => {
+	test("should set idle after clear and not start loading", () => {
 		const cache = new MemoImpl(Atom.create(idleCache as CacheState<string>), () => Promise.resolve("test"))
 		expect(cache.atom.get().status).toBe("idle")
-		const sub1 = cache.subscribe()
+		const sub1 = cache.subscribe(noop)
 		expect(cache.atom.get().status).toBe("pending")
 		sub1.unsubscribe()
 		cache.clear()
 		expect(cache.atom.get().status).toBe("idle")
+	})
+
+	test("should start loading right after clear if someone subscribed", async () => {
+		const atom = Atom.create<CacheState<string>>(idleCache)
+		const cache = new MemoImpl(atom, () => Promise.resolve("test"))
+		expect(atom.get().status).toBe("idle")
+		cache.subscribe(noop)
+		expect(atom.get().status).toBe("pending")
+		await waitForExpect(() => {
+			expect(atom.get().status).toBe("fulfilled")
+		})
+		expect(await cache.pipe(take(1)).toPromise()).toBe("test")
+		cache.clear()
+		expect(atom.get().status).toBe("pending")
+		await waitForExpect(() => {
+			expect(atom.get().status).toBe("fulfilled")
+		})
+		expect(await cache.pipe(take(1)).toPromise()).toBe("test")
 	})
 
 	test("get should return value and invalidate after clear", async () => {
@@ -91,24 +109,27 @@ describe("MemoImpl", () => {
 		expect(value1).toBe("other1")
 	})
 
-    test("should start fetching after subscribe on rejected Memo", async () => {
+	test("should start fetching after subscribe on rejected Memo", async () => {
 		const atom$ = Atom.create<CacheState<string>>(idleCache)
 		let counter = 0
-		const cache = new MemoImpl(atom$, async () => {
+		const cache = new MemoImpl(atom$, () => {
 			counter = counter + 1
-			if (counter < 2) {
-				return Promise.reject("rejected")
-			} else {
-				return "resolved"
-			}
+			return new Promise((resolve, reject) => {
+				setTimeout(() => {
+					return counter <= 1 ? reject("rejected") : resolve("resolved")
+				}, 100)
+			})
 		})
 		expect(counter).toEqual(0)
 		const emitted: string[] = []
 		const emittedStatuses: CacheState<any>["status"][] = []
-		atom$.subscribe(x => emittedStatuses.push(x.status))
+		atom$.subscribe(x => {
+			emittedStatuses.push(x.status)
+		})
 
-		const sub1 = cache.subscribe(value => emitted.push(value), noop)
+		const sub1 = cache.subscribe(x => emitted.push(x), noop)
 		expect(counter).toEqual(1)
+
 		await waitForExpect(() => {
 			expect(atom$.get().status).toBe("rejected")
 		})
@@ -116,7 +137,7 @@ describe("MemoImpl", () => {
 		sub1.unsubscribe()
 		expect(emittedStatuses).toStrictEqual(["idle", "pending", "rejected"])
 
-		const sub2 = cache.subscribe(value => emitted.push(value), noop)
+		const sub2 = cache.subscribe(x => emitted.push(x))
 		expect(counter).toEqual(2)
 		await waitForExpect(() => {
 			expect(atom$.get().status).toBe("fulfilled")
@@ -125,5 +146,27 @@ describe("MemoImpl", () => {
 		expect(emittedStatuses).toEqual(["idle", "pending", "rejected", "idle", "pending", "fulfilled"])
 		expect(emitted).toStrictEqual(["resolved"])
 		sub2.unsubscribe()
+	})
+
+	test("notifies observer if data is already fetched", async () => {
+		let counter = 0
+		const atom$ = Atom.create<CacheState<string>>(idleCache)
+		const cache = new MemoImpl(atom$, () => {
+			counter = counter + 1
+			return Promise.resolve("resolved")
+		})
+
+		cache.subscribe(noop)
+		const emitted1: string[] = []
+		cache.subscribe(x => emitted1.push(x))
+		await waitForExpect(() => {
+			expect(emitted1).toStrictEqual(["resolved"])
+		})
+		expect(counter).toBe(1)
+		cache.clear()
+		await waitForExpect(() => {
+			expect(emitted1).toStrictEqual(["resolved", "resolved"])
+		})
+		expect(counter).toBe(2)
 	})
 })

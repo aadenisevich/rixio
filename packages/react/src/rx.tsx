@@ -50,7 +50,6 @@ export function Rx({ pending, rejected, children, value$ }: RxProps): React.Reac
 				return (
 					<React.Fragment>
 						{rejected(value.error, () => {
-							console.log("RELOAD")
 							value.reload()
 							setNonce(n => n + 1)
 						})}

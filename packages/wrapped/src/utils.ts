@@ -33,11 +33,7 @@ export function wrap<T>(observable: WrappedObservable<T>): Observable<Wrapped<T>
 			},
 			error => {
 				got = true
-				s.next(createRejectedWrapped(error, () => {
-					if (typeof (observable as any).clear === "function") {
-						;(observable as any).clear()
-					}
-				}))
+				s.next(createRejectedWrapped(error))
 			},
 			() => {
 				got = true

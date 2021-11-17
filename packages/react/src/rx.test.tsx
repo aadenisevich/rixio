@@ -95,16 +95,12 @@ describe("Rx", () => {
 		const cache = new CacheImpl<string>(Atom.create(idleCache), () => {
 			counter = counter + 1
 			return new Promise<string>((resolve, reject) => {
-				setTimeout(() => counter <= 1 ? reject("my-error") : resolve("resolved"), 0)
+				setTimeout(() => (counter <= 1 ? reject("my-error") : resolve("resolved")), 0)
 			})
 		})
 		const r = render(
 			<span data-testid="test">
-				<Rx 
-					value$={cache}
-					pending="pending"
-					rejected={(err, reload) => <Testing text={err} reload={reload} />}
-				/>
+				<Rx value$={cache} pending="pending" rejected={(err, reload) => <Testing text={err} reload={reload} />} />
 			</span>
 		)
 		await waitFor(() => {
@@ -144,35 +140,27 @@ describe("Rx", () => {
 		})
 	})
 
-	test.only("Rx should work with Memo and reload", async () => {
+	test("Rx should work with MemoImpl and reload", async () => {
 		let counter = 0
 		const cache = new MemoImpl<string>(Atom.create(idleCache), () => {
 			counter = counter + 1
 			return new Promise<string>((resolve, reject) => {
-				setTimeout(() => {
-					console.log(counter <= 1 ? 'REJECTS' : 'RESOLVE')
-					counter <= 1 ? reject("my-error") : resolve("resolved")
-				}, 0)
+				setTimeout(() => (counter <= 1 ? reject("my-error") : resolve("resolved")), 0)
 			})
 		})
 		const r = render(
 			<span data-testid="test">
-				<Rx 
-					value$={cache}
-					pending="pending"
-					rejected={(err, reload) => <Testing text={err} reload={reload} />}
-				/>
+				<Rx value$={cache} pending="pending" rejected={(err, reload) => <Testing text={err} reload={reload} />} />
 			</span>
 		)
 		await waitFor(() => {
-			expect(r.getByTestId("reload")).toBeInTheDocument()
+			expect(r.getByTestId("test")).toHaveTextContent("my-error")
 		})
 		act(() => {
 			fireEvent.click(r.getByTestId("reload"))
 		})
 		await waitFor(() => {
-			console.log("123")
-			expect(r.getByTestId("test")).toHaveTextContent("pending")
+			expect(r.getByTestId("test")).toHaveTextContent("resolved")
 		})
 	})
 
@@ -279,11 +267,7 @@ describe("Rx", () => {
 		const obs = defer(() => promise)
 		const r = render(
 			<span data-testid="test">
-				<Rx
-					value$={obs}
-					pending="pending"
-					rejected={(err, reload) => <Testing text={err} reload={reload} />}
-				/>
+				<Rx value$={obs} pending="pending" rejected={(err, reload) => <Testing text={err} reload={reload} />} />
 			</span>
 		)
 		await waitForExpect(() => {

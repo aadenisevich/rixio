@@ -1,7 +1,8 @@
 import type { Atom } from "@rixio/atom"
-import { noop, Observable } from "rxjs"
-import { filter, first, map } from "rxjs/operators"
-import { MappedSubject } from "./mapped-subject-1"
+import { unwrap } from "@rixio/wrapped"
+import { Observable, ReplaySubject, Subscription } from "rxjs"
+import { first, map } from "rxjs/operators"
+import { toWrapped } from "./utils"
 import { CacheState, createFulfilledCache, idleCache } from "./domain"
 import { save } from "./impl"
 
@@ -13,55 +14,80 @@ export interface Memo<T> extends Observable<T> {
 	atom: Atom<CacheState<T>>
 }
 
-export class MemoImpl<T> extends MappedSubject<CacheState<T>, T> implements Memo<T> {
-    private shouldRefetch = false
+export class MemoImpl<T> extends Observable<T> implements Memo<T> {
+	private _sharedBuffer$: ReplaySubject<T> | undefined = undefined
+	private _subscription: Subscription | undefined = undefined
+	private _refCount = 0
 
 	constructor(public readonly atom: Atom<CacheState<T>>, private readonly _loader: () => Promise<T>) {
-		super(atom)
+		super(subscriber => {
+			const initial = atom.get()
+
+			if (initial.status === "rejected") {
+				this.clear()
+			}
+
+			if (!this._sharedBuffer$) {
+				this._sharedBuffer$ = new ReplaySubject(1)
+				this._subscription = atom.subscribe({
+					next: x => {
+						switch (x.status) {
+							case "idle":
+								save(this._loader(), this.atom).then()
+								break
+							case "rejected":
+								this._sharedBuffer$?.error(x.error)
+								break
+							case "fulfilled":
+								this._sharedBuffer$?.next(x.value)
+								break
+						}
+					},
+				})
+			}
+
+			this._refCount = this._refCount + 1
+			const localSub = this._sharedBuffer$!.subscribe({
+				error: err => subscriber.error(err),
+				next: value => subscriber.next(value),
+			})
+
+			subscriber.add(() => {
+				localSub.unsubscribe()
+				this._refCount = this._refCount - 1
+				if (this._refCount === 0 && this._subscription) {
+					this._subscription.unsubscribe()
+					this._subscription = undefined
+					this._sharedBuffer$ = undefined
+				}
+			})
+
+			return subscriber
+		})
 		this.clear = this.clear.bind(this)
 	}
 
-	get(force = false): Promise<T> {
-		if (force || this.hasError) {
+	async get(force = false): Promise<T> {
+		if (force) {
 			this.clear()
 		}
 		const s = this.atom.get()
-		switch (s.status) {
-			case "idle":
-				save(this._loader(), this.atom).catch(noop)
-				break;
-			case "fulfilled":
-				return Promise.resolve(s.value)
-			case "rejected":
-				return Promise.reject(s.error)
+		if (s.status === "rejected" || s.status === "idle") {
+			save(this._loader(), this.atom).then()
 		}
-		return this.atom
-			.pipe(
-				filter(x => x.status === "fulfilled" || x.status === "rejected"),
-				map(x => {
-					if (x.status === "fulfilled") {
-						return x.value
-					}
-					if (x.status === "rejected") {
-						throw x.error
-					}
-					throw new Error("Never happen")
-				}),
-				first()
-			)
-			.toPromise()
+		return this.atom.pipe(map(toWrapped), unwrap(), first()).toPromise()
 	}
 
 	set(value: T): void {
 		this.atom.set(createFulfilledCache(value))
 	}
 
-	modifyIfFulfilled(updateFn: (currentValue: T) => T): void {
+	modifyIfFulfilled(fn: (current: T) => T): void {
 		this.atom.modify(s => {
 			if (s.status === "fulfilled") {
 				return {
 					...s,
-					value: updateFn(s.value),
+					value: fn(s.value),
 				}
 			}
 			return s
@@ -70,24 +96,5 @@ export class MemoImpl<T> extends MappedSubject<CacheState<T>, T> implements Memo
 
 	clear(): void {
 		this.atom.set(idleCache)
-	}
-
-	protected _onValue(x: CacheState<T>) {
-		switch (x.status) {
-			case "idle":
-				save(this._loader(), this.atom).catch(noop)
-				break
-			case "rejected":
-                if (this.shouldRefetch) {
-					this.atom.set(idleCache)
-                } else {
-                    this.error(x.error)
-                    this.shouldRefetch = true
-                }
-				break
-			case "fulfilled":
-				this.next(x.value)
-				break
-		}
 	}
 }
