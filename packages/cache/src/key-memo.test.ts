@@ -1,7 +1,6 @@
 import { Atom } from "@rixio/atom"
 import { Map as IM } from "immutable"
 import waitForExpect from "wait-for-expect"
-import { waitFor } from "@testing-library/react"
 import { toListDataLoader } from "./key"
 import { CacheState, createFulfilledCache } from "./domain"
 import { KeyEvent } from "./domain"
@@ -43,7 +42,7 @@ describe("KeyMemoImpl", () => {
 		)
 		const emitted: Array<number | undefined> = []
 		cache.single("test").subscribe(value => emitted.push(value))
-		await waitFor(() => {
+		await waitForExpect(() => {
 			expect(emitted.length).toBe(1)
 			expect(emitted[0]).toEqual(undefined)
 		})
@@ -58,13 +57,13 @@ describe("KeyMemoImpl", () => {
 
 		const emitted: number[] = []
 		cache.single("key1").subscribe(value => emitted.push(value))
-		await waitFor(() => {
+		await waitForExpect(() => {
 			expect(emitted.length).toBe(1)
 			expect(emitted[0]).toEqual(10)
 		})
 		value = 20
 		cache.single("key1").clear()
-		await waitFor(() => {
+		await waitForExpect(() => {
 			expect(emitted.length).toBe(2)
 			expect(emitted[1]).toEqual(20)
 		})
@@ -83,7 +82,7 @@ describe("KeyMemoImpl", () => {
 		cache.events.subscribe(value => emitted.push(value))
 		cache.get("test").then()
 
-		await waitFor(() => {
+		await waitForExpect(() => {
 			expect(emitted.length).toBe(1)
 			expect(emitted[0]).toStrictEqual({
 				type: "add",
@@ -92,7 +91,7 @@ describe("KeyMemoImpl", () => {
 		})
 
 		cache.get("test2").then()
-		await waitFor(() => {
+		await waitForExpect(() => {
 			expect(emitted.length).toBe(2)
 			expect(emitted[1]).toStrictEqual({
 				type: "add",
@@ -101,7 +100,7 @@ describe("KeyMemoImpl", () => {
 		})
 
 		cache.set("test3", "test3")
-		await waitFor(() => {
+		await waitForExpect(() => {
 			expect(emitted.length).toBe(3)
 			expect(emitted[2]).toStrictEqual({
 				type: "add",

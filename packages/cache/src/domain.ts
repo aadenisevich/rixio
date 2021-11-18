@@ -46,7 +46,6 @@ export function createAddEvent<T>(key: T) {
 }
 
 export const UNDEFINED = Symbol.for("UNDEFINED")
-export type NotFound = typeof UNDEFINED
-export function isNotFound(value: unknown): value is NotFound {
+export function isNotFound(value: unknown): value is typeof UNDEFINED {
 	return value === UNDEFINED
 }
