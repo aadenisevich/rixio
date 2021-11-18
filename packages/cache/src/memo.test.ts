@@ -7,25 +7,30 @@ import { MemoImpl } from "./memo"
 
 describe("MemoImpl", () => {
 	test("should load data when subscribed and idle", async () => {
-		let times = 0
-		const cache = new MemoImpl(Atom.create(idleCache as CacheState<string>), () => {
-			times = times + 1
-			return Promise.resolve("loaded")
-		})
+		const { getTimes, cache } = createTestSet()
 		expect(cache.atom.get().status).toBe("idle")
 		const sub1 = cache.subscribe()
 		expect(cache.atom.get().status).toBe("pending")
 		const data = await cache.get()
 		expect(data).toBe("loaded")
-		expect(times).toBe(1)
+		expect(getTimes()).toBe(1)
 		sub1.unsubscribe()
 		const data2 = await cache.get()
 		expect(data2).toBe("loaded")
-		expect(times).toBe(1)
+		expect(getTimes()).toBe(1)
+	})
+
+	test("should force get", async () => {
+		const { getTimes, cache } = createTestSet()
+		await cache.get()
+		await cache.get()
+		expect(getTimes()).toBe(1)
+		await cache.get(true)
+		expect(getTimes()).toBe(2)
 	})
 
 	test("should set idle after clear and not start loading", () => {
-		const cache = new MemoImpl(Atom.create(idleCache as CacheState<string>), () => Promise.resolve("test"))
+		const { cache } = createTestSet()
 		expect(cache.atom.get().status).toBe("idle")
 		const sub1 = cache.subscribe(noop)
 		expect(cache.atom.get().status).toBe("pending")
@@ -35,30 +40,24 @@ describe("MemoImpl", () => {
 	})
 
 	test("should start loading right after clear if someone subscribed", async () => {
-		const atom = Atom.create<CacheState<string>>(idleCache)
-		const cache = new MemoImpl(atom, () => Promise.resolve("test"))
-		expect(atom.get().status).toBe("idle")
+		const { cache } = createTestSet()
+		expect(cache.atom.get().status).toBe("idle")
 		cache.subscribe(noop)
-		expect(atom.get().status).toBe("pending")
-		await waitForExpect(() => {
-			expect(atom.get().status).toBe("fulfilled")
-		})
-		expect(await cache.pipe(take(1)).toPromise()).toBe("test")
+		expect(cache.atom.get().status).toBe("pending")
+		await waitForExpect(() => expect(cache.atom.get().status).toBe("fulfilled"))
+		expect(await cache.pipe(take(1)).toPromise()).toBe("loaded")
 		cache.clear()
-		expect(atom.get().status).toBe("pending")
-		await waitForExpect(() => {
-			expect(atom.get().status).toBe("fulfilled")
-		})
-		expect(await cache.pipe(take(1)).toPromise()).toBe("test")
+		expect(cache.atom.get().status).toBe("pending")
+		await waitForExpect(() => expect(cache.atom.get().status).toBe("fulfilled"))
+		expect(await cache.pipe(take(1)).toPromise()).toBe("loaded")
 	})
 
 	test("get should return value and invalidate after clear", async () => {
 		let result: string = "loaded"
-		const cache = new MemoImpl(Atom.create(idleCache as CacheState<string>), () => {
-			return new Promise(resolve => {
-				setTimeout(() => resolve(result), 100)
-			})
-		})
+		const cache = new MemoImpl(
+			Atom.create(idleCache as CacheState<string>),
+			() => new Promise(resolve => setTimeout(() => resolve(result), 100))
+		)
 		expect(cache.atom.get().status).toBe("idle")
 		const value = await cache.get()
 		expect(value).toBe("loaded")
@@ -71,42 +70,37 @@ describe("MemoImpl", () => {
 	})
 
 	test("set should work", async () => {
-		const atom$ = Atom.create<CacheState<string>>(idleCache)
-		const cache = new MemoImpl(atom$, () => Promise.resolve("other"))
-		expect(atom$.get().status).toBe("idle")
+		const { cache } = createTestSet()
+		expect(cache.atom.get().status).toBe("idle")
 		const value1 = await cache.get()
-		expect(value1).toBe("other")
-		cache.set("loaded")
-		expect(atom$.get().status).toBe("fulfilled")
-
+		expect(value1).toBe("loaded")
+		cache.set("other")
+		expect(cache.atom.get().status).toBe("fulfilled")
 		const value = await cache.get()
-		expect(value).toBe("loaded")
+		expect(value).toBe("other")
 	})
 
 	test("modify should work", async () => {
-		const atom$ = Atom.create<CacheState<string>>(idleCache)
-		const cache = new MemoImpl(atom$, () => Promise.resolve("other"))
-		expect(atom$.get().status).toBe("idle")
+		const { cache } = createTestSet()
+		expect(cache.atom.get().status).toBe("idle")
 		const value1 = await cache.get()
-		expect(value1).toBe("other")
+		expect(value1).toBe("loaded")
 		cache.modifyIfFulfilled(x => x + "1")
-		expect(atom$.get().status).toBe("fulfilled")
-
+		expect(cache.atom.get().status).toBe("fulfilled")
 		const value = await cache.get()
-		expect(value).toBe("other1")
+		expect(value).toBe("loaded1")
 	})
 
 	test("rxjs operators should work", async () => {
-		const atom$ = Atom.create<CacheState<string>>(idleCache)
-		const cache = new MemoImpl(atom$, () => Promise.resolve("other"))
-		expect(atom$.get().status).toBe("idle")
+		const { cache } = createTestSet()
+		expect(cache.atom.get().status).toBe("idle")
 		const value1 = await cache
 			.pipe(
 				map(x => x + "1"),
 				first()
 			)
 			.toPromise()
-		expect(value1).toBe("other1")
+		expect(value1).toBe("loaded1")
 	})
 
 	test("should start fetching after subscribe on rejected Memo", async () => {
@@ -130,18 +124,14 @@ describe("MemoImpl", () => {
 		const sub1 = cache.subscribe(x => emitted.push(x), noop)
 		expect(counter).toEqual(1)
 
-		await waitForExpect(() => {
-			expect(atom$.get().status).toBe("rejected")
-		})
+		await waitForExpect(() => expect(atom$.get().status).toBe("rejected"))
 		expect(emitted).toStrictEqual([])
 		sub1.unsubscribe()
 		expect(emittedStatuses).toStrictEqual(["idle", "pending", "rejected"])
 
 		const sub2 = cache.subscribe(x => emitted.push(x))
 		expect(counter).toEqual(2)
-		await waitForExpect(() => {
-			expect(atom$.get().status).toBe("fulfilled")
-		})
+		await waitForExpect(() => expect(atom$.get().status).toBe("fulfilled"))
 		expect(counter).toEqual(2)
 		expect(emittedStatuses).toEqual(["idle", "pending", "rejected", "idle", "pending", "fulfilled"])
 		expect(emitted).toStrictEqual(["resolved"])
@@ -149,24 +139,25 @@ describe("MemoImpl", () => {
 	})
 
 	test("notifies observer if data is already fetched", async () => {
-		let counter = 0
-		const atom$ = Atom.create<CacheState<string>>(idleCache)
-		const cache = new MemoImpl(atom$, () => {
-			counter = counter + 1
-			return Promise.resolve("resolved")
-		})
-
+		const { getTimes, cache } = createTestSet()
 		cache.subscribe(noop)
 		const emitted1: string[] = []
 		cache.subscribe(x => emitted1.push(x))
-		await waitForExpect(() => {
-			expect(emitted1).toStrictEqual(["resolved"])
-		})
-		expect(counter).toBe(1)
+		await waitForExpect(() => expect(emitted1).toStrictEqual(["loaded"]))
+		expect(getTimes()).toBe(1)
 		cache.clear()
-		await waitForExpect(() => {
-			expect(emitted1).toStrictEqual(["resolved", "resolved"])
-		})
-		expect(counter).toBe(2)
+		await waitForExpect(() => expect(emitted1).toStrictEqual(["loaded", "loaded"]))
+		expect(getTimes()).toBe(2)
 	})
 })
+
+function createTestSet() {
+	let times = 0
+	return {
+		getTimes: () => times,
+		cache: new MemoImpl(Atom.create(idleCache as CacheState<string>), () => {
+			times = times + 1
+			return Promise.resolve("loaded")
+		}),
+	}
+}

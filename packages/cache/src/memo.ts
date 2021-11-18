@@ -1,8 +1,6 @@
 import type { Atom } from "@rixio/atom"
-import { unwrap } from "@rixio/wrapped"
 import { Observable, ReplaySubject, Subscription } from "rxjs"
-import { first, map } from "rxjs/operators"
-import { toWrapped } from "./utils"
+import { first } from "rxjs/operators"
 import { CacheState, createFulfilledCache, idleCache } from "./domain"
 import { save } from "./impl"
 
@@ -75,7 +73,7 @@ export class MemoImpl<T> extends Observable<T> implements Memo<T> {
 		if (s.status === "rejected" || s.status === "idle") {
 			save(this._loader(), this.atom).then()
 		}
-		return this.atom.pipe(map(toWrapped), unwrap(), first()).toPromise()
+		return this.pipe(first()).toPromise()
 	}
 
 	set(value: T): void {
